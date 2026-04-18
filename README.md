@@ -36,21 +36,21 @@ Each assistant response is generated as a mini-lesson that mixes:
 ## Local setup
 
 1. Install dependencies:
-   `npm install`
+   `pnpm install`
 2. Create a local env file:
    `cp .env.example .env.local`
 3. Set your Gemini API key in `.env.local`:
    `GEMINI_API_KEY=your_key_here`
 4. Start the app:
-   `npm run dev`
+   `pnpm dev`
 5. Open [http://localhost:3000](http://localhost:3000)
 
 ## Available scripts
 
-- `npm run dev`: start local development server
-- `npm run build`: production build
-- `npm run preview`: preview production build
-- `npm run lint`: TypeScript type-check (`tsc --noEmit`)
+- `pnpm dev`: start local development server
+- `pnpm build`: production build
+- `pnpm preview`: preview production build
+- `pnpm lint`: TypeScript type-check (`tsc --noEmit`)
 
 ## Notes
 
