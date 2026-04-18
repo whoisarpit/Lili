@@ -1,69 +1,68 @@
-import { Send, Loader2 } from "lucide-react";
+import { Loader2, Send } from "lucide-react";
 import {
-  useState,
-  useRef,
   useEffect,
+  useRef,
+  useState,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 import { cn } from "@/src/lib/utils";
 
-interface ChatInputProps {
+type ChatInputProps = {
   onSend: (message: string) => void;
   disabled?: boolean;
-}
+};
 
 export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleSubmit = (e?: FormEvent) => {
-    e?.preventDefault();
-    if (input.trim() && !disabled) {
-      onSend(input.trim());
-      setInput("");
+  const handleSubmit = (event?: FormEvent) => {
+    event?.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || disabled) {
+      return;
     }
+
+    onSend(trimmed);
+    setInput("");
   };
 
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
       handleSubmit();
     }
   };
 
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    if (!textareaRef.current) {
+      return;
     }
+
+    textareaRef.current.style.height = "auto";
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
   }, [input]);
 
   return (
-    <div className="bg-white border-t border-gray-100 p-4 pb-8">
-      <form
-        onSubmit={handleSubmit}
-        className="max-w-3xl mx-auto flex items-end gap-3 bg-[#F9FAFB] border border-gray-200 rounded-2xl p-2 px-3 shadow-sm focus-within:ring-2 focus-within:ring-orange-200 focus-within:border-orange-400 transition-all"
-      >
+    <div className="input-shell">
+      <form onSubmit={handleSubmit} className="input-form">
         <textarea
           ref={textareaRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type in Mandarin or English..."
-          disabled={disabled}
           rows={1}
-          className="flex-1 bg-transparent border-none focus:ring-0 resize-none py-2 px-1 text-[15px] placeholder:text-gray-400 max-h-[200px] outline-none"
+          disabled={disabled}
+          aria-label="Message Lǐli"
+          placeholder="Type in Mandarin or English..."
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={handleKeyDown}
+          className="input-textarea"
         />
         <button
           type="submit"
-          disabled={!input.trim() || disabled}
-          className={cn(
-            "p-2.5 rounded-xl transition-all",
-            input.trim() && !disabled
-              ? "bg-[#E67E22] text-white shadow-md hover:bg-[#D35400] active:scale-95 shadow-orange-200"
-              : "bg-gray-100 text-gray-400",
-          )}
+          aria-label={disabled ? "Sending message" : "Send message"}
+          disabled={disabled || !input.trim()}
+          className={cn("send-button", input.trim() && !disabled && "ready")}
         >
           {disabled ? (
             <Loader2 size={18} className="animate-spin" />
@@ -72,9 +71,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           )}
         </button>
       </form>
-      <p className="text-[10px] text-center mt-3 text-gray-400 uppercase tracking-widest font-medium">
-        Lǐli can speak and translate for you
-      </p>
+      <p className="input-caption">Shift + Enter for a new line</p>
     </div>
   );
 }

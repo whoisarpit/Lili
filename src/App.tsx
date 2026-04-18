@@ -1,24 +1,26 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { Info, Sparkles } from "lucide-react";
 import {
   ChatMessage as ChatMessageType,
+  HistoryMessage,
   getMandarinResponse,
   getSpeech,
 } from "./lib/gemini";
-import { ChatMessageBubble } from "./components/ChatMessage";
 import { ChatInput } from "./components/ChatInput";
-import { Sparkles, Info } from "lucide-react";
+import { ChatMessageBubble } from "./components/ChatMessage";
 
-interface Message {
+type Message = {
   role: "user" | "model";
   content: string | ChatMessageType;
   timestamp: number;
-}
+};
+
+const QUICK_PROMPTS = [
+  "Say Hello",
+  "Introduce yourself",
+  "Ask for numbers 1-10",
+] as const;
 
 const INITIAL_MESSAGE: Message = {
   role: "model",
@@ -46,44 +48,113 @@ const INITIAL_MESSAGE: Message = {
   timestamp: Date.now(),
 };
 
+function toHistory(messages: Message[]): HistoryMessage[] {
+  return messages.map((msg) => ({
+    role: msg.role,
+    parts: [
+      {
+        text:
+          typeof msg.content === "string"
+            ? msg.content
+            : JSON.stringify(msg.content),
+      },
+    ],
+  }));
+}
+
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [globalError, setGlobalError] = useState<string | null>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<Message[]>([INITIAL_MESSAGE]);
+  const requestCounterRef = useRef(0);
+  const chatAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    scrollToBottom();
+    messagesRef.current = messages;
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
   }, [messages]);
 
+  useEffect(() => {
+    return () => {
+      chatAbortRef.current?.abort();
+    };
+  }, []);
+
+  const hasUserMessage = useMemo(
+    () => messages.some((message) => message.role === "user"),
+    [messages],
+  );
+
+  const handlePlaySpeech = async (text: string) => {
+    const { url, error } = await getSpeech(text);
+
+    if (url) {
+      const audio = new Audio(url);
+      await audio.play();
+      setGlobalError(null);
+      return;
+    }
+
+    if (error === "MISSING_API_KEY") {
+      setGlobalError(
+        "Server is missing the Gemini API key. Set GEMINI_API_KEY and restart the API process.",
+      );
+      return;
+    }
+
+    if (error === "QUOTA_EXCEEDED") {
+      setGlobalError(
+        "Gemini TTS quota exceeded. Audio might be unavailable for a while, but your lesson can continue in text.",
+      );
+    }
+  };
+
   const handleSend = async (text: string) => {
+    const messageText = text.trim();
+    if (!messageText || isLoading) {
+      return;
+    }
+
     const userMessage: Message = {
       role: "user",
-      content: text,
+      content: messageText,
       timestamp: Date.now(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const nextMessages = [...messagesRef.current, userMessage];
+    setMessages(nextMessages);
     setIsLoading(true);
+    setGlobalError(null);
+
+    chatAbortRef.current?.abort();
+    const abortController = new AbortController();
+    chatAbortRef.current = abortController;
+
+    const requestId = requestCounterRef.current + 1;
+    requestCounterRef.current = requestId;
 
     try {
-      // Prepare history for Gemini
-      const history = messages.map((msg) => ({
-        role: msg.role,
-        parts: [
-          {
-            text:
-              typeof msg.content === "string"
-                ? msg.content
-                : JSON.stringify(msg.content),
-          },
-        ],
-      }));
+      const response = await getMandarinResponse(
+        messageText,
+        toHistory(nextMessages.slice(0, -1)),
+        abortController.signal,
+      );
 
-      const response = await getMandarinResponse(text, history);
+      if (requestCounterRef.current !== requestId) {
+        return;
+      }
+
+      if (response.error === "MISSING_API_KEY") {
+        setGlobalError(
+          "Server is missing the Gemini API key. Set GEMINI_API_KEY and restart the API process.",
+        );
+      }
 
       const modelMessage: Message = {
         role: "model",
@@ -91,88 +162,85 @@ export default function App() {
         timestamp: Date.now(),
       };
 
-      setMessages((prev) => [...prev, modelMessage]);
+      setMessages((current) => [...current, modelMessage]);
 
-      // Auto-play TTS for the first phrase found in the new response
       const firstPhrase = response.content.find(
         (item) => item.type === "phrase",
       )?.phrase;
       if (firstPhrase) {
-        handlePlaySpeech(firstPhrase.chinese);
+        handlePlaySpeech(firstPhrase.chinese).catch(() => {
+          setGlobalError("Audio playback failed in this browser session.");
+        });
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      setGlobalError("Request failed. Check your API server and try again.");
       console.error("Chat error:", error);
     } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const [globalError, setGlobalError] = useState<string | null>(null);
-
-  const handlePlaySpeech = async (text: string) => {
-    const { url, error } = await getSpeech(text);
-    if (url) {
-      const audio = new Audio(url);
-      audio.play().catch((e) => console.error("Audio playback error:", e));
-      setGlobalError(null);
-    } else if (error === "QUOTA_EXCEEDED") {
-      setGlobalError(
-        "Gemini TTS quota exceeded. Audio might be unavailable for a while, but we can continue our lesson in text!",
-      );
+      if (requestCounterRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
   };
 
   return (
-    <div className="flex flex-col h-screen max-h-screen bg-[#FDFCFB] font-sans">
-      {/* Header */}
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-100 bg-white/80 px-6 backdrop-blur-md sticky top-0 z-10 transition-all">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="h-10 w-10 overflow-hidden rounded-full border-2 border-[#E67E22] bg-[#FFF4ED] flex items-center justify-center text-[#E67E22] font-bold">
-              莉
-            </div>
-            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-green-500"></div>
-          </div>
+    <div className="app-shell">
+      <div className="ambient ambient-one" aria-hidden="true" />
+      <div className="ambient ambient-two" aria-hidden="true" />
+
+      <motion.header
+        initial={{ opacity: 0, y: -18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="app-header"
+      >
+        <div className="brand-wrap">
+          <div className="brand-badge">莉</div>
           <div>
-            <h1 className="text-sm font-bold text-[#1A1A1A]">Lǐli (莉莉)</h1>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-medium text-green-600 bg-green-50 px-1.5 rounded uppercase tracking-wider">
-                Online
-              </span>
-              <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">
-                • HSK 1 Specialist
-              </span>
-            </div>
+            <h1 className="brand-name">Lǐli (莉莉)</h1>
+            <p className="brand-meta">ONLINE • HSK 1 STUDIO</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button className="p-2 text-gray-400 hover:text-orange-600 transition-colors rounded-lg hover:bg-orange-50">
-            <Info size={18} />
+        <div className="header-actions">
+          <button
+            type="button"
+            aria-label="App info"
+            className="icon-button"
+            onClick={() =>
+              setGlobalError(
+                "Lǐli is tuned for beginner Mandarin conversation and phrase practice.",
+              )
+            }
+          >
+            <Info size={16} />
           </button>
-          <div className="h-8 w-[1px] bg-gray-100 mx-1"></div>
-          <div className="flex items-center gap-1 text-[#E67E22] bg-orange-50 px-3 py-1.5 rounded-full text-xs font-semibold">
-            <Sparkles size={14} />
+          <div className="powered-pill">
+            <Sparkles size={13} />
             <span>AI Powered</span>
           </div>
         </div>
-      </header>
+      </motion.header>
 
       <AnimatePresence>
         {globalError && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="bg-orange-50 border-b border-orange-100 px-6 py-2 flex items-center justify-between gap-4 overflow-hidden"
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            className="global-banner"
           >
-            <div className="flex items-center gap-2 text-orange-800 text-[11px] font-medium leading-tight">
-              <Info size={14} className="shrink-0" />
+            <div className="global-banner-copy">
+              <Info size={14} />
               <span>{globalError}</span>
             </div>
             <button
+              type="button"
               onClick={() => setGlobalError(null)}
-              className="text-orange-400 hover:text-orange-600 transition-colors uppercase text-[10px] font-bold tracking-wider"
+              className="dismiss-button"
             >
               Dismiss
             </button>
@@ -180,43 +248,65 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Main Chat Area */}
-      <main className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="max-w-4xl mx-auto flex flex-col min-h-full">
-          {/* Welcome Card */}
-          <div className="p-6 md:p-10 text-center space-y-4">
-            <div className="inline-flex flex-col items-center">
-              <span className="text-4xl">🎓</span>
-              <h2 className="text-2xl font-bold text-gray-900 mt-2">
-                Start Your Journey
-              </h2>
-              <p className="text-sm text-gray-500 max-w-sm mx-auto mt-2">
-                Learn Mandarin naturally through conversation. Lǐli will help
-                you with characters, pinyin, and pronunciation.
-              </p>
-            </div>
-            <div className="flex flex-wrap justify-center gap-2 mt-4">
-              {["Say Hello", "Introduce yourself", "Ask for numbers 1-10"].map(
-                (hint) => (
-                  <button
-                    key={hint}
-                    onClick={() => handleSend(hint)}
-                    className="px-4 py-2 rounded-full border border-orange-100 bg-white text-xs font-medium text-orange-600 hover:bg-orange-50 hover:border-orange-200 transition-all shadow-sm active:scale-95"
-                  >
-                    {hint}
-                  </button>
-                ),
-              )}
-            </div>
-          </div>
+      <main className="chat-main custom-scrollbar">
+        <div className="chat-content">
+          <AnimatePresence initial={false}>
+            {!hasUserMessage && (
+              <motion.section
+                key="intro"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.45, ease: "easeOut" }}
+                className="intro-zone"
+              >
+                <p className="intro-overline">Mandarin Coaching</p>
+                <h2 className="intro-title">
+                  Begin with one phrase and build rhythm.
+                </h2>
+                <p className="intro-copy">
+                  Ask anything in English or Mandarin. Lǐli answers in compact
+                  mini-lessons with characters, pinyin, and pronunciation.
+                </p>
+                <div className="prompt-row">
+                  {QUICK_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => handleSend(prompt)}
+                      className="prompt-chip"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </motion.section>
+            )}
+          </AnimatePresence>
 
-          <div className="flex-1">
-            {messages.map((msg, i) => (
+          {hasUserMessage && (
+            <section className="compact-prompts" aria-label="Quick prompts">
+              {QUICK_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => handleSend(prompt)}
+                  className="prompt-chip compact"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </section>
+          )}
+
+          <div className="messages-wrap">
+            {messages.map((message, index) => (
               <ChatMessageBubble
-                key={`${msg.timestamp}-${i}`}
-                message={msg}
+                key={`${message.timestamp}-${index}`}
+                message={message}
                 onPlaySpeech={handlePlaySpeech}
-                isLatest={i === messages.length - 1}
               />
             ))}
             <div ref={messagesEndRef} className="h-4" />
@@ -224,10 +314,9 @@ export default function App() {
         </div>
       </main>
 
-      {/* Footer / Input */}
-      <div className="max-w-4xl mx-auto w-full sticky bottom-0">
+      <footer className="chat-footer">
         <ChatInput onSend={handleSend} disabled={isLoading} />
-      </div>
+      </footer>
     </div>
   );
 }

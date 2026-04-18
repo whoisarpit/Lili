@@ -1,37 +1,33 @@
 # Lǐli (莉莉) Mandarin Teacher
 
-Lǐli is a React + TypeScript web app that teaches beginner Mandarin (HSK 1) through structured conversation.  
-Each assistant response is generated as a mini-lesson that mixes:
+Lǐli is a React + TypeScript app for HSK 1 Mandarin practice.
+It provides structured mini-lessons with:
 
 - English teaching text
-- Mandarin phrases with Chinese characters, Pinyin, and translation
-- One-click pronunciation playback (TTS)
+- Mandarin phrases with Chinese, pinyin, and translation
+- One-click pronunciation playback
 
-## What the app does
+## What changed
 
-- Starts each session with an onboarding lesson from Lǐli.
-- Accepts user chat input in English or Mandarin.
-- Sends user input and chat history to the Gemini model.
-- Forces structured JSON responses using a schema.
-- Renders lesson cards and phrase blocks in the chat UI.
-- Auto-plays pronunciation for the first phrase in each assistant response.
-- Lets users replay phrase audio on demand.
-- Handles quota/traffic errors gracefully in both chat and TTS flows.
+- Gemini calls now run through a local server (`/api/chat`, `/api/speech`) so API keys stay server-side.
+- Client adds request-ordering safeguards and abort control to avoid stale or out-of-order responses.
+- UI refreshed with a calmer studio look, stronger hierarchy, and improved accessibility.
 
 ## Tech stack
 
 - React 19 + TypeScript
-- Vite 6
-- Tailwind CSS 4
-- Motion (animations)
+- Vite 6 + Tailwind CSS 4
+- Motion
+- Express API server
 - Google GenAI SDK (`@google/genai`)
 
 ## Project structure
 
-- `src/App.tsx`: chat orchestration, history handling, loading state, global errors
-- `src/lib/gemini.ts`: Gemini text generation + TTS integration and response schema
-- `src/components/ChatMessage.tsx`: message/lesson rendering and phrase playback controls
-- `src/components/ChatInput.tsx`: textarea input with enter-to-send behavior
+- `src/App.tsx`: chat orchestration, request lifecycle, global messaging
+- `src/lib/gemini.ts`: typed client helpers for `/api` endpoints
+- `src/components/ChatMessage.tsx`: lesson/phrase rendering and playback controls
+- `src/components/ChatInput.tsx`: message input behavior
+- `server/index.ts`: Gemini text + TTS API routes
 
 ## Local setup
 
@@ -39,20 +35,16 @@ Each assistant response is generated as a mini-lesson that mixes:
    `pnpm install`
 2. Create a local env file:
    `cp .env.example .env.local`
-3. Set your Gemini API key in `.env.local`:
+3. Set your key in `.env.local`:
    `GEMINI_API_KEY=your_key_here`
-4. Start the app:
+4. Start app + API server:
    `pnpm dev`
 5. Open [http://localhost:3000](http://localhost:3000)
 
-## Available scripts
+## Scripts
 
-- `pnpm dev`: start local development server
-- `pnpm build`: production build
-- `pnpm preview`: preview production build
-- `pnpm lint`: TypeScript type-check (`tsc --noEmit`)
-
-## Notes
-
-- The app expects `GEMINI_API_KEY` to be present at runtime.
-- TTS uses the Gemini preview TTS model and may be rate-limited depending on quota.
+- `pnpm dev`: run API server and Vite dev server
+- `pnpm build`: build client bundle
+- `pnpm start`: run production API server (serves `dist/` when built)
+- `pnpm preview`: preview client bundle only
+- `pnpm lint`: TypeScript type-check
